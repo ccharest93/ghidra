@@ -16,6 +16,8 @@
 package ghidra.app.util.pdb.pdbapplicator;
 
 import java.util.Objects;
+import java.util.Stack;
+import java.util.TreeMap;
 
 import ghidra.app.util.bin.format.pdb2.pdbreader.PdbException;
 import ghidra.app.util.bin.format.pdb2.pdbreader.symbol.AbstractMsSymbol;
@@ -74,84 +76,41 @@ public class RegisterRelativeSymbolApplier extends MsSymbolApplier {
 			applicator.appendLogMsg("Could not create stack variable for non-existent function.");
 			return false;
 		}
-		//Variable[] allVariables = function.getAllVariables();
-
-		String registerName = symbol.getRegisterNameString();
-		Register register = applicator.getRegister(registerName);
-		Register sp = applicator.getProgram().getCompilerSpec().getStackPointer();
-		if (register != sp) {
-			// have seen fbp here.
-			// TODO; can we do something more generic below that does not rely on stack frame?
-			//  would like to do RSP + X, or RBP + X, or RDX + X.
-			return false;
+		Variable[] allVariables = function.getAllVariables();
+		TreeMap<Long,RegisterRelativeSymbolApplier> varAppliersByOffset = new TreeMap<Long,RegisterRelativeSymbolApplier>();
+		for (MsSymbolApplier varApplier : applier.allAppliers) {
+			if (varApplier instanceof RegisterRelativeSymbolApplier){
+				varAppliersByOffset.put(((RegisterRelativeSymbolApplier)varApplier).symbol.getOffset(), (RegisterRelativeSymbolApplier)varApplier);
+			}
 		}
-
-		Integer registerChange = applier.getRegisterPrologChange(register);
-
-		StackFrame stackFrame = function.getStackFrame();
-
-		int baseParamOffset = applier.getBaseParamOffset();
-		long frameSize = applier.getCurrentFrameSize();
-//		long relativeOffset = symbol.getOffset() - applier.getCurrentFrameSize();
-		if (registerChange == null) {
-			registerChange = 0;
+		Stack<RegisterRelativeSymbolApplier> paramAppliers = new Stack<RegisterRelativeSymbolApplier>();
+		for(int i =0; i < function.getParameterCount();i++) {
+			if (!varAppliersByOffset.isEmpty()) {
+				paramAppliers.push(varAppliersByOffset.pollLastEntry().getValue());
+			}
 		}
-		long relativeOffset = symbol.getOffset() + registerChange;
-//		long relativeOffset = symbol.getOffset() + x;
-//		if (relativeOffset > Integer.MAX_VALUE) {
-//			applicator.appendLogMsg("Offset too large for our applier.");
-//			//return false;
-//		}
-		int offset = (int) (relativeOffset & 0xffffffffL);
-
-		MsTypeApplier dataTypeApplier =
-			applicator.getTypeApplier(symbol.getTypeRecordNumber());
-		DataType dt = dataTypeApplier.getDataType();
-		if (dt != null) {
-//			Variable m16 = stackFrame.getVariableContaining(-16);
-//			Variable m8 = stackFrame.getVariableContaining(-8);
-//			Variable x0 = stackFrame.getVariableContaining(0);
-//			Variable x8 = stackFrame.getVariableContaining(8);
-//			Variable x16 = stackFrame.getVariableContaining(16);
-//			Variable x24 = stackFrame.getVariableContaining(24);
-//			Variable x32 = stackFrame.getVariableContaining(32);
-//			Variable x40 = stackFrame.getVariableContaining(40);
-//			Variable x48 = stackFrame.getVariableContaining(48);
-//			Variable x56 = stackFrame.getVariableContaining(56);
-			Variable variable = stackFrame.getVariableContaining(offset);
+		if(function.getParameterCount()  != paramAppliers.size()) {
+			function.getAllVariables();
+		}
+		for(Variable variable: allVariables) {
 			try {
-				if (variable == null || variable.getStackOffset() != offset) {
-					if (variable != null) {
-						stackFrame.clearVariable(variable.getStackOffset());
+				if (variable instanceof AutoParameterImpl  && !paramAppliers.empty()) {
+					if(variable.getName().compareTo("__return_storage_ptr__") == 0) {
+						continue;
 					}
-					try {
-						variable = stackFrame.createVariable(symbol.getName(), offset, dt,
-							SourceType.IMPORTED);
-					}
-					catch (DuplicateNameException e) {
-						variable = stackFrame.createVariable(
-							symbol.getName() + "@" + Integer.toHexString(offset), offset, dt,
-							SourceType.IMPORTED);
-					}
+					paramAppliers.pop();
 				}
-				else {
-					variable.setDataType(dt, false, true, SourceType.ANALYSIS);
-					try {
-						variable.setName(symbol.getName(), SourceType.IMPORTED);
-					}
-					catch (DuplicateNameException e) {
-						variable.setName(symbol.getName() + "@" + Integer.toHexString(offset),
-							SourceType.IMPORTED);
-					}
+				else if (variable instanceof Parameter && !paramAppliers.empty()) {
+					variable.setName(paramAppliers.pop().symbol.getName(),SourceType.IMPORTED);
 				}
 			}
-			catch (InvalidInputException | DuplicateNameException e) {
-				applicator.appendLogMsg("Unable to create stack variable " + symbol.getName() +
-					" at offset " + offset + " in " + function.getName());
-				return false;
+			catch (DuplicateNameException e) {
+				continue;
 			}
-		}
+			catch (InvalidInputException e) {
+			e.printStackTrace();
+			}
+		}	
 		return true;
 	}
-
 }

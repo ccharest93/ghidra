@@ -58,7 +58,7 @@ public class FunctionSymbolApplier extends MsSymbolApplier {
 
 //	private List<RegisterRelativeSymbolApplier> stackVariableAppliers = new ArrayList<>();
 
-	private List<MsSymbolApplier> allAppliers = new ArrayList<>();
+	public List<MsSymbolApplier> allAppliers = new ArrayList<>();
 	private RegisterChangeCalculator registerChangeCalculator;
 
 	/**
@@ -190,8 +190,15 @@ public class FunctionSymbolApplier extends MsSymbolApplier {
 		registerChangeCalculator = new RegisterChangeCalculator(procedureSymbol, function, monitor);
 
 		baseParamOffset = VariableUtilities.getBaseStackParamOffset(function);
-
+		//process all registerRelativeSymbols at the same time
+		boolean registersApplied = false;
 		for (MsSymbolApplier applier : allAppliers) {
+			if(applier instanceof RegisterRelativeSymbolApplier) {
+				if(registersApplied) {
+					continue; 
+				}
+				registersApplied = true;
+			}
 			applier.applyTo(this);
 		}
 
